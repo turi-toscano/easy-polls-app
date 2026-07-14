@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Easy Polls — crea un sondaggio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="wrap">
+    <a class="brand" href="/">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>Easy Polls</strong>
+    </a>
+
+    <h1>Fai una domanda, conta le risposte.</h1>
+    <p class="lede">Crea un sondaggio in dieci secondi, condividi il link, guarda i risultati arrivare in tempo reale.</p>
+
+    <div class="card">
+      <label class="field">
+        <span class="lab">La tua domanda</span>
+        <input type="text" id="question" maxlength="280" placeholder="Es. Dove andiamo a cena venerdì?" autocomplete="off">
+      </label>
+
+      <span class="lab" style="font-size:14px;font-weight:500;display:block;margin-bottom:7px;">Opzioni</span>
+      <div class="options-list" id="options"></div>
+      <button type="button" class="link-btn" id="add-opt">+ Aggiungi opzione</button>
+
+      <button type="button" class="btn" id="create">Crea il sondaggio</button>
+      <p class="msg err" id="msg" role="alert"></p>
+
+      <div class="share" id="share" hidden>
+        <h2>Fatto! Condividi questi link.</h2>
+        <div>
+          <span class="lab">Link per votare</span>
+          <div class="copyrow">
+            <input type="text" id="vote-url" readonly>
+            <button type="button" data-copy="vote-url">Copia</button>
+          </div>
+        </div>
+        <div style="margin-top:14px;">
+          <span class="lab">Link ai risultati</span>
+          <div class="copyrow">
+            <input type="text" id="results-url" readonly>
+            <button type="button" data-copy="results-url">Copia</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const optionsEl = document.getElementById("options");
+    const msg = document.getElementById("msg");
+
+    function addOption(value = "") {
+      const row = document.createElement("div");
+      row.className = "opt-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 120;
+      input.placeholder = `Opzione ${optionsEl.children.length + 1}`;
+      input.value = value;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "icon-btn";
+      del.innerHTML = "&times;";
+      del.setAttribute("aria-label", "Rimuovi opzione");
+      del.onclick = () => { row.remove(); refreshState(); };
+      row.append(input, del);
+      optionsEl.append(row);
+      refreshState();
+    }
+
+    function refreshState() {
+      // Servono almeno due opzioni: disabilita i cestini quando ne restano due.
+      const dels = optionsEl.querySelectorAll(".icon-btn");
+      dels.forEach(d => d.disabled = optionsEl.children.length <= 2);
+    }
+
+    addOption();
+    addOption();
+    document.getElementById("add-opt").onclick = () => addOption();
+
+    document.getElementById("create").onclick = async (e) => {
+      const btn = e.currentTarget;
+      msg.textContent = "";
+      const question = document.getElementById("question").value.trim();
+      const options = [...optionsEl.querySelectorAll("input")]
+        .map(i => i.value.trim()).filter(Boolean);
+
+      if (!question) { msg.textContent = "Scrivi una domanda."; return; }
+      if (options.length < 2) { msg.textContent = "Servono almeno due opzioni."; return; }
+
+      btn.disabled = true; btn.textContent = "Creo…";
+      try {
+        const res = await fetch("/api/polls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, options }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Qualcosa è andato storto.");
+        }
+        const poll = await res.json();
+        const base = window.location.origin;
+        document.getElementById("vote-url").value = `${base}/vote.html?id=${poll.id}`;
+        document.getElementById("results-url").value = `${base}/results.html?id=${poll.id}`;
+        document.getElementById("share").hidden = false;
+        document.getElementById("share").scrollIntoView({ behavior: "smooth" });
+      } catch (err) {
+        msg.textContent = err.message;
+      } finally {
+        btn.disabled = false; btn.textContent = "Crea il sondaggio";
+      }
+    };
+
+    document.querySelectorAll("[data-copy]").forEach(b => {
+      b.onclick = async () => {
+        const field = document.getElementById(b.dataset.copy);
+        await navigator.clipboard.writeText(field.value).catch(() => field.select());
+        const prev = b.textContent; b.textContent = "Copiato";
+        setTimeout(() => (b.textContent = prev), 1400);
+      };
+    });
+  </script>
+</body>
+</html>

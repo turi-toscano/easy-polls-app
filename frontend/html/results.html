@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Easy Polls — risultati</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="wrap">
+    <a class="brand" href="/">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>Easy Polls</strong>
+    </a>
+
+    <div id="root">
+      <div class="state">Carico i risultati…</div>
+    </div>
+  </main>
+
+  <script>
+    const root = document.getElementById("root");
+    const id = new URLSearchParams(location.search).get("id");
+    const BARS = ["--bar-0", "--bar-1", "--bar-2", "--bar-3", "--bar-4", "--bar-5"];
+    const POLL_MS = 3000;
+    let built = false;
+    let timer = null;
+
+    function esc(s) {
+      return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    function fail(text) {
+      if (timer) clearInterval(timer);
+      root.innerHTML = `<div class="card"><div class="state">${esc(text)}</div>
+        <a class="btn" href="/">Crea un nuovo sondaggio</a></div>`;
+    }
+
+    function build(poll) {
+      const rows = poll.options.map((o, i) => `
+        <div class="result-row" data-oid="${o.id}">
+          <div class="result-head">
+            <span class="txt">${esc(o.text)}</span>
+            <span class="num"><span class="pct">0%</span> · <span class="cnt">0</span></span>
+          </div>
+          <div class="track"><div class="fill" style="background:var(${BARS[i % BARS.length]})"></div></div>
+        </div>`).join("");
+
+      root.innerHTML = `
+        <h1>${esc(poll.question)}</h1>
+        <div class="card">
+          ${rows}
+          <div class="total-line">
+            <span class="pulse" aria-hidden="true"></span>
+            <span><span id="total">0</span> voti · aggiornamento in tempo reale</span>
+          </div>
+          <div class="actions-row">
+            <a class="btn ghost" href="/vote.html?id=${encodeURIComponent(id)}">Vota</a>
+            <button type="button" class="btn ghost" id="copy">Copia link</button>
+          </div>
+        </div>`;
+
+      document.getElementById("copy").onclick = async (e) => {
+        await navigator.clipboard.writeText(location.href).catch(() => {});
+        e.currentTarget.textContent = "Copiato"; setTimeout(() => (e.currentTarget.textContent = "Copia link"), 1400);
+      };
+      built = true;
+    }
+
+    function update(poll) {
+      const total = poll.totalVotes || 0;
+      document.getElementById("total").textContent = total;
+      poll.options.forEach(o => {
+        const row = root.querySelector(`.result-row[data-oid="${o.id}"]`);
+        if (!row) return;
+        const pct = total ? Math.round((o.votes / total) * 100) : 0;
+        const fill = row.querySelector(".fill");
+        fill.style.width = (total ? Math.max(pct, 4) : 0) + "%";
+        fill.textContent = pct >= 12 ? pct + "%" : "";
+        row.querySelector(".pct").textContent = pct + "%";
+        row.querySelector(".cnt").textContent = o.votes;
+      });
+    }
+
+    async function tick() {
+      if (!id) return fail("Manca l'identificativo del sondaggio.");
+      try {
+        const res = await fetch(`/api/results/${encodeURIComponent(id)}`, { cache: "no-store" });
+        if (res.status === 404) return fail("Questo sondaggio non esiste o è scaduto.");
+        if (!res.ok) throw new Error();
+        const poll = await res.json();
+        if (!built) build(poll);
+        update(poll);
+      } catch {
+        if (!built) fail("Non riesco a caricare i risultati. Riprova tra poco.");
+      }
+    }
+
+    tick();
+    timer = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", () => {
+      // Non martellare il servizio quando la scheda e' in background.
+      if (document.hidden) { clearInterval(timer); }
+      else { tick(); timer = setInterval(tick, POLL_MS); }
+    });
+  </script>
+</body>
+</html>

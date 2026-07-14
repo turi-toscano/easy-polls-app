@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Easy Polls — vota</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="wrap">
+    <a class="brand" href="/">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>Easy Polls</strong>
+    </a>
+
+    <div id="root">
+      <div class="state">Carico il sondaggio…</div>
+    </div>
+  </main>
+
+  <script>
+    const root = document.getElementById("root");
+    const id = new URLSearchParams(location.search).get("id");
+    let selected = null;
+
+    function esc(s) {
+      return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    async function load() {
+      if (!id) { return notFound("Manca l'identificativo del sondaggio."); }
+      try {
+        const res = await fetch(`/api/results/${encodeURIComponent(id)}`);
+        if (res.status === 404) return notFound("Questo sondaggio non esiste o è scaduto.");
+        if (!res.ok) throw new Error();
+        render(await res.json());
+      } catch {
+        notFound("Non riesco a caricare il sondaggio. Riprova tra poco.");
+      }
+    }
+
+    function notFound(text) {
+      root.innerHTML = `<div class="card"><div class="state">${esc(text)}</div>
+        <a class="btn" href="/">Crea un nuovo sondaggio</a></div>`;
+    }
+
+    function render(poll) {
+      const choices = poll.options.map(o => `
+        <div class="choice" role="radio" aria-checked="false" tabindex="0" data-oid="${o.id}">
+          <span class="dot"></span><span class="txt">${esc(o.text)}</span>
+        </div>`).join("");
+
+      root.innerHTML = `
+        <h1>${esc(poll.question)}</h1>
+        <p class="lede">Scegli una risposta e conferma il voto.</p>
+        <div class="card">
+          <div class="choices" role="radiogroup">${choices}</div>
+          <button type="button" class="btn" id="vote" disabled>Conferma il voto</button>
+          <p class="msg err" id="msg" role="alert"></p>
+          <button type="button" class="link-btn" id="skip" style="display:block;margin-top:10px;">
+            Guarda i risultati senza votare
+          </button>
+        </div>`;
+
+      const pick = (el) => {
+        selected = Number(el.dataset.oid);
+        root.querySelectorAll(".choice").forEach(c => {
+          const on = c === el;
+          c.classList.toggle("selected", on);
+          c.setAttribute("aria-checked", on ? "true" : "false");
+        });
+        document.getElementById("vote").disabled = false;
+      };
+      root.querySelectorAll(".choice").forEach(c => {
+        c.onclick = () => pick(c);
+        c.onkeydown = (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); pick(c); } };
+      });
+
+      document.getElementById("skip").onclick =
+        () => location.href = `/results.html?id=${encodeURIComponent(id)}`;
+
+      document.getElementById("vote").onclick = async (e) => {
+        if (selected === null) return;
+        const btn = e.currentTarget; btn.disabled = true; btn.textContent = "Invio…";
+        try {
+          const res = await fetch(`/api/polls/${encodeURIComponent(id)}/vote`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ option_id: selected }),
+          });
+          if (!res.ok) throw new Error();
+          location.href = `/results.html?id=${encodeURIComponent(id)}`;
+        } catch {
+          document.getElementById("msg").textContent = "Voto non riuscito. Riprova.";
+          btn.disabled = false; btn.textContent = "Conferma il voto";
+        }
+      };
+    }
+
+    load();
+  </script>
+</body>
+</html>

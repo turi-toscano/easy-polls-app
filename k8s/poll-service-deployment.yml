@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: poll-service
+  labels:
+    app: poll-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: poll-service
+  template:
+    metadata:
+      labels:
+        app: poll-service
+    spec:
+      containers:
+        - name: poll-service
+          image: ECR_REGISTRY/easy-polls-poll-service:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: password
+            - name: MONGODB_URI
+              value: "mongodb://easypolls:$(MONGO_PASSWORD)@DOCDB_ENDPOINT:27017/easypolls?authSource=admin&retryWrites=false"
+            - name: MONGODB_DB
+              value: easypolls
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi

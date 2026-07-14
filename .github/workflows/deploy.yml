@@ -1,0 +1,122 @@
+name: Deploy application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'poll-service/**'
+      - 'results-service/**'
+      - 'k8s/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  PROJECT: easy-polls
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push images
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          for service in frontend poll-service results-service; do
+            IMAGE="$ECR_REGISTRY/${PROJECT}-${service}"
+            docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" "$service/"
+            docker push "$IMAGE:$IMAGE_TAG"
+            docker push "$IMAGE:latest"
+          done
+
+      - name: Discover infrastructure
+        run: |
+          BASTION_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${PROJECT}-bastion" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+
+          DOCDB_ENDPOINT=$(aws docdb describe-db-clusters \
+            --db-cluster-identifier "${PROJECT}-docdb" \
+            --query "DBClusters[0].Endpoint" --output text)
+
+          if [ -z "$BASTION_IP" ] || [ "$BASTION_IP" = "None" ]; then
+            echo "::error::Bastion host not found."
+            exit 1
+          fi
+
+          echo "Bastion: $BASTION_IP"
+          echo "BASTION_IP=$BASTION_IP" >> "$GITHUB_ENV"
+          echo "DOCDB_ENDPOINT=$DOCDB_ENDPOINT" >> "$GITHUB_ENV"
+
+      - name: Write bastion SSH key
+        run: |
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > bastion_key
+          chmod 600 bastion_key
+
+      - name: Verify cluster access
+        run: |
+          ssh -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$BASTION_IP" 'kubectl get nodes'
+
+      - name: Create MongoDB secret
+        run: |
+          ssh -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$BASTION_IP" \
+              "kubectl create secret generic mongo-secret --from-literal=password=${{ secrets.MONGO_PASSWORD }} \
+              --dry-run=client -o yaml | kubectl apply -f -"
+
+      - name: Render manifests
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed -i "s|ECR_REGISTRY|${ECR_REGISTRY}|g; \
+                  s|IMAGE_TAG|${IMAGE_TAG}|g; \
+                  s|DOCDB_ENDPOINT|${DOCDB_ENDPOINT}|g" k8s/*.yml 
+
+      - name: Copy manifests to bastion
+        run: |
+          ssh -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$BASTION_IP" 'rm -rf ~/k8s && mkdir -p ~/k8s'
+
+          scp -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              k8s/*.yml ubuntu@"$BASTION_IP":~/k8s/
+
+      - name: Apply manifests
+        run: |
+          ssh -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$BASTION_IP" 'kubectl apply -f ~/k8s/'
+
+      - name: Wait for rollout
+        run: |
+          ssh -i bastion_key \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              ubuntu@"$BASTION_IP" '
+                kubectl rollout status deployment/frontend --timeout=120s
+                kubectl rollout status deployment/poll-service --timeout=120s
+                kubectl rollout status deployment/results-service --timeout=120s
+              '

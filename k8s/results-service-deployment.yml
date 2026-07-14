@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: results-service
+  labels:
+    app: results-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: results-service
+  template:
+    metadata:
+      labels:
+        app: results-service
+    spec:
+      containers:
+        - name: results-service
+          image: ECR_REGISTRY/easy-polls-results-service:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: password
+            - name: MONGODB_URI
+              value: "mongodb://easypolls:$(MONGO_PASSWORD)@DOCDB_ENDPOINT:27017/easypolls?authSource=admin&retryWrites=false"
+            - name: MONGODB_DB
+              value: easypolls
+          resources:
+            requests:
+              cpu: 100m # base su cui l'HPA calcola la percentuale di utilizzo
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
