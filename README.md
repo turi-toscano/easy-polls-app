@@ -1,75 +1,86 @@
-# Obiettivo
+# Important Note
 
-Questa repository contiene il codice sorgente dell'applicativo Easy Polls, i manifest Kubernetes necessari al suo deployment e il workflow di CI/CD che ne automatizza la build e il rilascio all'interno del cluster situato in AWS.
+The application's code is out of the project's scope and is not developed by me: the microservices are taken for granted to create the Kubernetes cluster (both locally and in cloud). 
 
-### Applicativo
+---
 
-L'applicativo è un'applicazione web per la creazione di sondaggi istantanei: un utente crea una domanda con alcune opzioni di risposta, ottiene un link condivisibile, e chiunque abbia il link può votare. I risultati sono visualizzabili in una pagina dedicata, che si aggiorna in tempo reale mostrando le percentuali di voto. L'applicazione è divisa in tre componenti, più il database MongoDB:
- - `frontend`: interfaccia web statica per la creazione dei sondaggi.
- - `poll-service`: espone l'API per la creazione dei sondaggi e la registrazione dei voti.
- - `results-service`: espone l'API per la restituzione dei risultati di un determinato sondaggio.
+# Goal
 
-Il database è **Amazon DocumentDB**, un servizio gestito compatibile con MongoDB, situato all'esterno del cluster: nella repository non è quindi presente alcun manifest relativo alla persistenza dei dati.\
-L'`HorizontalPodAutoscaler` è configurato esclusivamente sul `results-service`, che scala in base all'utilizzo di CPU.
+This repository contains the source code of the Easy Polls application, the Kubernetes manifests required to deploy it, and the CI/CD workflow that automates its build and release inside the cluster running in AWS.
 
-## Struttura della repository
+### Application
+
+The application is a web app for creating instant polls: a user creates a question with a few answer options, gets a shareable link, and anyone with the link can vote. Results are available on a dedicated page that updates in real time showing the voting percentages. The application is split into three components, plus the MongoDB database:
+
+- `frontend`: static web interface for creating polls.
+- `poll-service`: exposes the API for creating polls and recording votes.
+- `results-service`: exposes the API that returns the results of a given poll.
+
+The database is **Amazon DocumentDB**, a managed MongoDB-compatible service that lives outside the cluster: this repository therefore contains no manifest related to data persistence.
+The `HorizontalPodAutoscaler` is configured on the `results-service` only, which scales based on CPU utilization.
+
+## Repository structure
 
 ```
 ├── frontend
-│   ├── Dockerfile
-│   └── html
-│       ├── app.css
-│       ├── index.html
-│       ├── results.html
-│       └── vote.html
+│   ├── Dockerfile
+│   └── html
+│       ├── app.css
+│       ├── index.html
+│       ├── results.html
+│       └── vote.html
 ├── k8s
-│   ├── frontend-deployment.yml
-│   ├── frontend-service.yml
-│   ├── ingress.yml
-│   ├── poll-service-deployment.yml
-│   ├── poll-service-service.yml
-│   ├── results-service-deployment.yml
-│   ├── results-service-scaling.yml
-│   └── results-service-service.yml
+│   ├── frontend-deployment.yml
+│   ├── frontend-service.yml
+│   ├── ingress.yml
+│   ├── poll-service-deployment.yml
+│   ├── poll-service-service.yml
+│   ├── results-service-deployment.yml
+│   ├── results-service-scaling.yml
+│   └── results-service-service.yml
 ├── poll-service
-│   ├── Dockerfile
-│   ├── app.py
-│   └── requirements.txt
+│   ├── Dockerfile
+│   ├── app.py
+│   └── requirements.txt
 └── results-service
     ├── Dockerfile
     ├── app.py
     └── requirements.txt
 ```
 
-### Directory k8s
+### k8s directory
 
-La directory `k8s` contiene i manifest Kubernetes che descrivono lo stato desiderato dell'applicativo all'interno del cluster. In particolare:
- - I manifest relativi al `frontend` definiscono il `Deployment` del frontend, con due repliche, e il relativo `Service` di tipo `ClusterIP`. L'instradamento delle chiamate API è gestito dall'Ingress.
- - I manifest relativi al `poll-service` definiscono il `Deployment` del servizio, con due repliche, e il relativo `Service` di tipo `ClusterIP`.
- - I manifest relativi al `results-service` definiscono il `Deployment` del servizio, il relativo `Service` di tipo `ClusterIP` e l'`HorizontalPodAutoscaler`, che scala il numero di repliche da $2$ a $6$ in base all'utilizzo medio di CPU.
- - `ingress.yml` definisce la risorsa `Ingress`, che descrive le regole di instradamento delle richieste in base al prefisso del path e vengono gestite dall'Ingress Controller nginx, in ascolto sulla NodePort $30080$ dei nodi del cluster.
+The `k8s` directory contains the Kubernetes manifests that describe the desired state of the application inside the cluster. In particular:
 
-Nei manifest vengono utilizzati tre *placeholder*, che vengono sostituiti dal workflow di deployment al momento del rilascio, dopo che l'infrastruttura è stata creata:
- - `ECR_REGISTRY`: l'indirizzo del registry ECR.
- - `IMAGE_TAG`: il tag dell'immagine, corrispondente all'hash del commit.
- - `DOCDB_ENDPOINT`: l'endpoint del cluster DocumentDB.
+- The `frontend` manifests define the frontend `Deployment`, with two replicas, and its `ClusterIP` `Service`. Routing of API calls is handled by the Ingress.
+- The `poll-service` manifests define the service `Deployment`, with two replicas, and its `ClusterIP` `Service`.
+- The `results-service` manifests define the service `Deployment`, its `ClusterIP` `Service` and the `HorizontalPodAutoscaler`, which scales the number of replicas from $2$ to $6$ based on average CPU utilization.
+- `ingress.yml` defines the `Ingress` resource, which describes the routing rules based on the path prefix; these are handled by the nginx Ingress Controller, listening on NodePort $30080$ of the cluster nodes.
+
+The manifests use three *placeholders*, which are replaced by the deployment workflow at release time, after the infrastructure has been created:
+
+- `ECR_REGISTRY`: the address of the ECR registry.
+- `IMAGE_TAG`: the image tag, corresponding to the commit hash.
+- `DOCDB_ENDPOINT`: the endpoint of the DocumentDB cluster.
 
 ### Workflows
 
-La directory `.github/workflows` contiene il workflow di CI/CD dell'applicativo. È presente un solo workflow:ù
- - `deploy.yml`: si attiva a seguito di un push sul branch `main`, oppure manualmente, ed è inoltre triggerato automaticamente dal workflow di provisioning dell'infrastruttura al termine della configurazione del cluster. Si occupa di effettuare la build delle tre immagini dei container e pubblicarle su Amazon ECR, marcandole con l'hash del commit, creare il secret di Kubernetes `mongo-secret` a partire dal segreto `MONGO_PASSWORD` della repository e sostituire i *placeholder* all'interno dei manifest e applicarli al cluster, attendendo infine il completamento del rollout.
+The `.github/workflows` directory contains the application's CI/CD workflow. There is a single workflow:
+
+- `deploy.yml`: it runs on a push to the `main` branch, or manually, and it is also triggered automatically by the infrastructure provisioning workflow once the cluster has been configured. It builds the three container images and publishes them to Amazon ECR, tagging them with the commit hash; creates the `mongo-secret` Kubernetes secret from the repository's `MONGO_PASSWORD` secret; replaces the *placeholders* inside the manifests and applies them to the cluster; and finally waits for the rollout to complete.
 
 ---
 
 # Setup
 
-### Creazione dell'environment e dei segreti
+### Creating the environment and the secrets
 
-Affinché il workflow di deployment funzioni correttamente, è necessario creare un environment e aggiungere dei segreti. Per creare l'environment, è sufficiente andare su `Settings > Environments > New environment` chiamandolo `production` e, una volta creato, è possibile aggiungere i segreti cliccando su `Add environment secret` in `Environment secrets` e aggiungere:
- - `AWS_ROLE_ARN`: corrisponde all'ARN del ruolo IAM creato precedentemente.
- - `BASTION_SSH_PRIVATE_KEY`: occorre utilizzare la chiave privata del Bastion Host generata per la repository dell'infrastruttura.
- - `MONGO_PASSWORD`: corrisponde alla password che verrà usata per l'istanza di DocumentDB.
+For the deployment workflow to work correctly, an environment must be created and some secrets added. To create the environment, go to `Settings > Environments > New environment` and name it `production`; once created, the secrets can be added by clicking `Add environment secret` under `Environment secrets`:
 
-### Deployment nel cluster
+- `AWS_ROLE_ARN`: the ARN of the IAM role created previously.
+- `BASTION_SSH_PRIVATE_KEY`: use the Bastion Host private key generated for the infrastructure repository.
+- `MONGO_PASSWORD`: the password that will be used for the DocumentDB instance.
 
-A seguito di ogni nuovo push, oppure al completamento del workflow di provisioning dell'infrastruttura, il workflow di deployment si occuperà di applicare i manifest Kubernetes e aspettare il rollout della nuova versione.
+### Deploying to the cluster
+
+After every new push, or once the infrastructure provisioning workflow completes, the deployment workflow applies the Kubernetes manifests and waits for the new version to roll out.
