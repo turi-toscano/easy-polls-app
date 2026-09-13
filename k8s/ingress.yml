@@ -1,15 +1,3 @@
-# Instradamento per prefisso di path, eseguito da ingress-nginx.
-#
-# Il percorso completo del traffico:
-#   client :80 -> NLB -> NodePort 30080 -> ingress-nginx (DaemonSet, un pod per
-#   nodo, externalTrafficPolicy: Local) -> questo Ingress -> Service -> pod
-#
-#   /api/polls    -> poll-service    (scrittura)
-#   /api/results  -> results-service (lettura)
-#   /             -> frontend        (statici)
-#
-# Nessun host: si risponde su qualunque Host header, quindi il DNS dell'NLB
-# funziona senza configurazione aggiuntiva.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
